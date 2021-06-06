@@ -12,6 +12,7 @@ from ..databases import schemas
 from ..databases.models import (
     DailyHistoryPrice,
     Fruit,
+    FruitLocation,
     MonthlyHistoryPrice,
 )
 
@@ -28,7 +29,7 @@ def transform(fruits) -> List[schemas.Fruit]:
     except:
         res = fruits
 
-    print(res)
+    #  print(res)
 
     if isinstance(res, list):
         if len(res) > 0:
@@ -40,14 +41,22 @@ def transform(fruits) -> List[schemas.Fruit]:
             #          res[i]['prices'] = res[i]['prices']['price']
             if 'monthly_price' in res[0]:
                 for i in range(len(res)):
-                    res[i]['monthly_price'] = [{'price': m['price'], 'year': m['year'], 'month': m['month']} for m in res[i]['monthly_price']]
+                    res[i]['monthly_price'] = [{
+                        'price': m['price'],
+                        'year': m['year'],
+                        'month': m['month']
+                    } for m in res[i]['monthly_price']]
     elif res is not None:
         if 'months' in res:
             res['months'] = [m['month'] for m in res['months']]
         #  if 'prices' in res:
         #      res['prices'] = res['prices']['price']
         if 'monthly_price' in res:
-            res['monthly_price'] = [{'price': m['price'], 'year': m['year'], 'month': m['month']} for m in res['monthly_price']]
+            res['monthly_price'] = [{
+                'price': m['price'],
+                'year': m['year'],
+                'month': m['month']
+            } for m in res['monthly_price']]
 
     return res
 
@@ -68,9 +77,24 @@ async def get_all_fruits(db: Session = Depends(get_db)):
 
     prices = jsonable_encoder(prices)
 
+    locations = db.query(FruitLocation) \
+        .all()
+
+    locations = jsonable_encoder(locations)
+
+    location_data = {}
+    for i in locations:
+        if i['fruit_id'] not in location_data:
+            location_data[i['fruit_id']] = []
+        location_data[i['fruit_id']].append({
+            'id': i['location']['id'],
+            'name': i['location']['name'],
+        })
+
     for i in range(len(res)):
         price = next(filter(lambda x: x['fruit_id'] == res[i]['id'], prices), None)
         res[i]['prices'] = price['price'] if price is not None and 'price' in price else None
+        res[i]['locations'] = location_data[res[i]['id']] if res[i]['id'] in location_data else []
 
     return transform(res)
 
@@ -80,10 +104,10 @@ async def wip_search_fruits(
     data: schemas.SearchFruit,
     db: Session = Depends(get_db)
 ):
-    query = db.query(Fruit).join(Fruit.months)
+    query = db.query(Fruit)
 
     if data.months:
-        query = query.filter(and_(Fruit.months.any(month=m) for m in data.months))
+        query = query.join(Fruit.months).filter(and_(Fruit.months.any(month=m) for m in data.months))
 
     if data.id:
         query = query.filter(Fruit.id.like(f'%{data.id}%'))
@@ -91,13 +115,41 @@ async def wip_search_fruits(
     if data.name:
         query = query.filter(Fruit.name.like(f'%{data.name}%'))
 
-    return transform(query.all())
+    res = jsonable_encoder(query.all())
+
+    yesterday = (datetime.today() - timedelta(days=3)).strftime('%Y-%m-%d')
+    prices = db.query(DailyHistoryPrice) \
+        .filter(DailyHistoryPrice.trading_date == yesterday) \
+        .all()
+
+    prices = jsonable_encoder(prices)
+
+    locations = db.query(FruitLocation).all()
+
+    locations = jsonable_encoder(locations)
+
+    location_data = {}
+    for i in locations:
+        if i['fruit_id'] not in location_data:
+            location_data[i['fruit_id']] = []
+        location_data[i['fruit_id']].append({
+            'id': i['location']['id'],
+            'name': i['location']['name'],
+        })
+
+    for i in range(len(res)):
+        price = next(filter(lambda x: x['fruit_id'] == res[i]['id'], prices), None)
+        res[i]['prices'] = price['price'] if price is not None and 'price' in price else None
+        res[i]['locations'] = location_data[res[i]['id']] if res[i]['id'] in location_data else []
+
+    res = list(filter(lambda x: any(data.location in y for y in map(lambda l: l['name'], x['locations'])), res))
+
+    return transform(res)
 
 
 @router.get('/test')
 async def test(db: Session = Depends(get_db)):
     res = db.execute(text('select "hello"')).one_or_none()
-    #  print(type(db))
     return {'hello': res}
 
 
@@ -116,8 +168,23 @@ async def get_fruit_by_id(id: str, db: Session = Depends(get_db)):
 
     prices = jsonable_encoder(prices)
 
+    locations = db.query(FruitLocation).all()
+
+    locations = jsonable_encoder(locations)
+
+    location_data = {}
+    for i in locations:
+        if i['fruit_id'] not in location_data:
+            location_data[i['fruit_id']] = []
+        location_data[i['fruit_id']].append({
+            'id': i['location']['id'],
+            'name': i['location']['name'],
+        })
+
+
     price = next(filter(lambda x: x['fruit_id'] == res['id'], prices), None)
     res['prices'] = price['price'] if price is not None and 'price' in price else None
+    res['locations'] = location_data[res['id']] if res['id'] in location_data else []
 
     return transform(res)
 
@@ -137,7 +204,7 @@ async def update_fruit_by_id(
         .one_or_none()
 
     if fruit is None:
-        raise HTTPException(status_code=404)
+        raise HTTPException(404)
 
     data = jsonable_encoder(update_fruit)
 
@@ -173,7 +240,7 @@ async def delete_fruit_by_id(id: str, db: Session = Depends(get_db)):
         .one_or_none()
 
     if fruit is None:
-        raise HTTPException(status_code=404)
+        raise HTTPException(404)
 
     db.query(Fruit) \
         .filter(Fruit.id == id) \

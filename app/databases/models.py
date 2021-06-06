@@ -94,3 +94,5 @@ class FruitLocation(Base):
     fruit_id = Column(String, ForeignKey('fruits.id'), primary_key=True)
     location_id = Column(Integer, ForeignKey('locations.id'), primary_key=True)
 
+    location = relationship('Location', lazy='joined')
+

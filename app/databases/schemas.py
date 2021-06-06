@@ -46,7 +46,7 @@ class Fruit(BaseModel):
     months: List[int]
     prices: float = None
     monthly_price: Optional[Any]
-    location: Optional[Location]
+    locations: Optional[List[Location]]
 
     class Config:
         orm_mode = True
@@ -62,9 +62,10 @@ class CreateFruit(BaseModel):
 
 
 class SearchFruit(BaseModel):
-    months: List[int] = []
+    months: Optional[List[int]] = []
     id: Optional[str]
     name: Optional[str]
+    location: Optional[str]
 
 
 class Token(BaseModel):
